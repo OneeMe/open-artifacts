@@ -1,5 +1,5 @@
 {
-  "name": "@voyage/testing",
+  "name": "@open-artifacts/testing",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -1,13 +1,13 @@
-# Voyage
+# Open Artifacts
 
-Voyage is an npm-workspace TypeScript project.
+Open Artifacts is an npm-workspace TypeScript project.
 
 The template intentionally leaves `apps/web` empty. Choose Next.js, Vite, Astro, Remix, or another web stack when a real project needs one.
 
 ## Structure
 
 ```text
-voyage/
+open-artifacts/
 ├── apps/
 │   ├── android/             # Empty Android app slot; choose a stack later
 │   ├── ios/                 # Empty iOS app slot; choose a stack later

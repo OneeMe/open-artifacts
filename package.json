@@ -1,7 +1,7 @@
 {
-  "name": "voyage",
+  "name": "open-artifacts",
   "version": "0.1.0",
-  "description": "Voyage workspace.",
+  "description": "Open Artifacts workspace.",
   "private": true,
   "type": "module",
   "workspaces": [
