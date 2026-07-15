@@ -154,7 +154,7 @@ export default function VideoEditor({ data }: VideoEditorProps) {
         </aside>
 
         <section className="ve-editor-workspace" data-testid="editor-workspace">
-          <div className="ve-preview-stage">
+          <div className="ve-preview-stage" data-testid="preview-surface">
             <div className="ve-preview-heading">
               <div>
                 <small>Preview</small>
@@ -191,7 +191,7 @@ export default function VideoEditor({ data }: VideoEditorProps) {
             </div>
           </div>
 
-          <div className="ve-timeline-panel">
+          <div className="ve-timeline-panel" data-testid="timeline-surface">
             <div className="ve-timeline-toolbar">
               <div>
                 <button type="button">Split</button>
@@ -227,7 +227,11 @@ export default function VideoEditor({ data }: VideoEditorProps) {
                   <strong>{data.media.title}</strong>
                   <span>{data.media.kind}</span>
                 </div>
-                <div className="ve-playhead" style={{ left: playheadPosition }}>
+                <div
+                  className="ve-playhead"
+                  data-testid="timeline-playhead"
+                  style={{ left: playheadPosition }}
+                >
                   <span />
                 </div>
                 <input

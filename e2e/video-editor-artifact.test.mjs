@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
 import { chromium } from 'playwright';
@@ -63,7 +64,13 @@ test('oa serves a playable and synchronized Video Editor Artifact', async (t) =>
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.goto(session.url);
 
-  for (const surface of ['project-bar', 'agent-surface', 'media-library', 'editor-workspace']) {
+  for (const surface of [
+    'project-bar',
+    'agent-surface',
+    'media-library',
+    'preview-surface',
+    'timeline-surface',
+  ]) {
     await page.getByTestId(surface).waitFor({ state: 'visible' });
   }
 
@@ -82,18 +89,14 @@ test('oa serves a playable and synchronized Video Editor Artifact', async (t) =>
   const video = page.getByTestId('preview-video');
   const playToggle = page.getByRole('button', { name: 'Play preview' });
   await playToggle.click();
-  await video.evaluate(
-    (element) =>
-      new Promise((resolvePlayback) => {
-        const handleTimeUpdate = () => {
-          if (element.currentTime <= 0.1) return;
-          element.removeEventListener('timeupdate', handleTimeUpdate);
-          resolvePlayback(undefined);
-        };
-        element.addEventListener('timeupdate', handleTimeUpdate);
-        handleTimeUpdate();
-      }),
-  );
+  const playbackDeadline = Date.now() + 5_000;
+  let playbackTime = 0;
+  while (Date.now() < playbackDeadline) {
+    playbackTime = await video.evaluate((element) => element.currentTime);
+    if (playbackTime > 0.1) break;
+    await delay(50);
+  }
+  assert.ok(playbackTime > 0.1, `playback did not advance: currentTime=${playbackTime}`);
   assert.equal(await video.evaluate((element) => element.paused), false);
 
   await page.getByRole('button', { name: 'Pause preview' }).click();
@@ -104,8 +107,13 @@ test('oa serves a playable and synchronized Video Editor Artifact', async (t) =>
   const scrubbedTime = await video.evaluate((element) => element.currentTime);
   assert.ok(scrubbedTime >= 0.65 && scrubbedTime <= 0.85, `currentTime=${scrubbedTime}`);
   assert.equal(await page.getByTestId('timeline-time').getAttribute('data-time'), '0.75');
+  const playheadPercent = await page
+    .getByTestId('timeline-playhead')
+    .evaluate((element) => Number.parseFloat(element.style.left));
+  assert.ok(playheadPercent >= 45 && playheadPercent <= 60, `left=${playheadPercent}%`);
 });
 
 async function assertSelected(locator, expected) {
   assert.equal(await locator.getAttribute('aria-selected'), String(expected));
+  assert.equal((await locator.getAttribute('class')).includes('is-selected'), expected);
 }
