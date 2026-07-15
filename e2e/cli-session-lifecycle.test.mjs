@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  access,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const repositoryRoot = resolve(import.meta.dirname, '..');
 const cliEntry = resolve(repositoryRoot, 'apps/cli/dist/cli/index.js');
 const artifactRoot = resolve(repositoryRoot, 'packages/artifact-decision-board');
+const plainArtifactRoot = resolve(repositoryRoot, 'packages/artifact-evidence-trace');
 
 function buildCli() {
   const result = spawnSync('npm', ['run', 'build', '--workspace', '@open-artifacts/cli'], {
@@ -178,6 +189,47 @@ test('run, list, and stop manage concurrent Active Sessions independently', asyn
   const emptyHumanList = runCli(['session', 'list'], home);
   assert.equal(emptyHumanList.status, 0, emptyHumanList.stderr);
   assert.equal(emptyHumanList.stdout, 'No Active Artifact Sessions.\n');
+});
+
+test('the Runtime denies Session control files when the Artifact root contains them', async (t) => {
+  buildCli();
+  const root = await mkdtemp(join(tmpdir(), 'open-artifacts-control-boundary-'));
+  const home = join(root, 'artifact-home');
+  await cp(plainArtifactRoot, home, { recursive: true });
+  let session;
+
+  t.after(async () => {
+    if (session) stopSession(home, session.sessionId);
+    await rm(root, { force: true, recursive: true });
+  });
+
+  const result = runCli(['run', home, '--json', '--no-open'], home);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  session = JSON.parse(result.stdout);
+  const secretPath = join(
+    home,
+    '.open-artifacts',
+    'sessions',
+    session.sessionId,
+    'instance.secret',
+  );
+  const secret = (await readFile(secretPath, 'utf8')).trim();
+
+  const response = await globalThis.fetch(new globalThis.URL(`/@fs/${secretPath}`, session.url));
+  assert.equal(response.status, 403);
+  assert.doesNotMatch(await response.text(), new RegExp(secret));
+
+  const controlLink = join(home, 'linked-session-control');
+  await symlink(join(home, '.open-artifacts', 'sessions', session.sessionId), controlLink);
+  const linkedResponse = await globalThis.fetch(
+    new globalThis.URL(`/@fs/${join(controlLink, 'instance.secret')}`, session.url),
+  );
+  assert.equal(linkedResponse.status, 403);
+  assert.doesNotMatch(await linkedResponse.text(), new RegExp(secret));
+
+  const stopped = stopSession(home, session.sessionId);
+  assert.equal(stopped.status, 0, stopped.stderr || stopped.stdout);
+  session = undefined;
 });
 
 test('process ownership remains stable when Session commands use different timezones', async (t) => {

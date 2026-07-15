@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { createServer, normalizePath } from 'vite';
 import type { Plugin } from 'vite';
@@ -12,6 +12,36 @@ import { reactAliases, reactRuntimeDirectory } from './react.js';
 
 const virtualEntryId = 'virtual:open-artifacts-session-entry';
 const resolvedVirtualEntryId = `\0${virtualEntryId}`;
+
+function fileSystemRequestPath(requestUrl: string | undefined) {
+  try {
+    const pathname = new URL(requestUrl ?? '/', 'http://127.0.0.1').pathname;
+    if (!pathname.startsWith('/@fs/')) return undefined;
+    return decodeURIComponent(pathname.slice('/@fs/'.length));
+  } catch {
+    return undefined;
+  }
+}
+
+function isWithinDirectory(directory: string, candidate: string) {
+  const relativePath = relative(resolve(directory), resolve(candidate));
+  if (relativePath === '') return true;
+  if (isAbsolute(relativePath)) return false;
+  if (relativePath === '..') return false;
+  if (relativePath.startsWith(`..${sep}`)) return false;
+  return true;
+}
+
+async function isSessionControlPath(sessionDirectory: string, candidate: string) {
+  if (isWithinDirectory(sessionDirectory, candidate)) return true;
+  const resolvedCandidate = await realpath(candidate).catch(() => undefined);
+  if (!resolvedCandidate) return false;
+  const resolvedSessionDirectory = await realpath(sessionDirectory).catch(() =>
+    resolve(sessionDirectory),
+  );
+  return isWithinDirectory(resolvedSessionDirectory, resolvedCandidate);
+}
+
 function tokenMatches(expected: string, authorization: string | undefined) {
   if (!authorization?.startsWith('Bearer ')) return false;
   const provided = authorization.slice('Bearer '.length);
@@ -33,6 +63,23 @@ function artifactSessionPlugin(
   return {
     name: 'open-artifacts-session',
     configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const requestedPath = fileSystemRequestPath(request.url);
+        if (!requestedPath) {
+          next();
+          return;
+        }
+        void isSessionControlPath(config.sessionDirectory, requestedPath)
+          .then((isControlPath) => {
+            if (!isControlPath) {
+              next();
+              return;
+            }
+            response.statusCode = 403;
+            response.end('Session control files are not browser-accessible.');
+          })
+          .catch(next);
+      });
       server.middlewares.use('/__oa/health', (_request, response) => {
         response.statusCode = 200;
         response.setHeader('content-type', 'application/json');
