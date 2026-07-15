@@ -43,7 +43,7 @@ async function stopSession(home, sessionId) {
   await rm(sessionDirectory, { force: true, recursive: true });
 }
 
-test('oa serves a playable and synchronized Video Editor Artifact', async (t) => {
+test('oa serves a collaborative and synchronized Video Editor Artifact', async (t) => {
   buildCli();
   const home = await mkdtemp(join(tmpdir(), 'open-artifacts-video-editor-'));
   let browser;
@@ -61,12 +61,19 @@ test('oa serves a playable and synchronized Video Editor Artifact', async (t) =>
   sessionId = session.sessionId;
 
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1080, height: 680 } });
   await page.goto(session.url);
 
   const editorBounds = await page.getByRole('main').boundingBox();
-  assert.equal(editorBounds?.width, 1440);
-  assert.ok((editorBounds?.height ?? 0) >= 900, `editor height=${editorBounds?.height}`);
+  assert.equal(editorBounds?.width, 1080);
+  assert.equal(editorBounds?.height, 680);
+  assert.deepEqual(
+    await page.locator('html').evaluate((element) => ({
+      horizontal: element.scrollWidth > element.clientWidth,
+      vertical: element.scrollHeight > element.clientHeight,
+    })),
+    { horizontal: false, vertical: false },
+  );
 
   for (const surface of [
     'project-bar',
@@ -115,9 +122,94 @@ test('oa serves a playable and synchronized Video Editor Artifact', async (t) =>
     .getByTestId('timeline-playhead')
     .evaluate((element) => Number.parseFloat(element.style.left));
   assert.ok(playheadPercent >= 45 && playheadPercent <= 60, `left=${playheadPercent}%`);
+
+  const previewFrame = page.getByTestId('preview-frame');
+  assert.equal(await previewFrame.getAttribute('data-aspect-ratio'), '16:9');
+
+  await page.getByRole('checkbox', { name: 'Tighten pacing' }).uncheck();
+  await page.getByRole('checkbox', { name: 'Captions' }).check();
+  await page.getByRole('checkbox', { name: 'Music bed' }).check();
+  await page.getByLabel('Target platform').selectOption('tiktok');
+  await page.getByLabel('Aspect ratio').selectOption('9:16');
+  await page.getByRole('button', { name: 'Apply brief' }).click();
+
+  assert.equal(await page.getByTestId('project-status').textContent(), 'Unexported changes');
+  assert.equal(await previewFrame.getAttribute('data-aspect-ratio'), '9:16');
+  assert.equal(
+    await previewFrame.evaluate(
+      (element) => element.ownerDocument.defaultView?.getComputedStyle(element).aspectRatio,
+    ),
+    '9 / 16',
+  );
+  const portraitBounds = await previewFrame.boundingBox();
+  assert.ok(portraitBounds, 'portrait preview frame is visible');
+  assert.ok(
+    Math.abs(portraitBounds.width / portraitBounds.height - 9 / 16) < 0.02,
+    `portrait frame=${portraitBounds.width}x${portraitBounds.height}`,
+  );
+
+  const summaries = page.getByTestId('conversation-summary');
+  assert.equal(await summaries.count(), 1);
+  await summaries.nth(0).getByText('Captions, Music bed', { exact: true }).waitFor();
+  await summaries.nth(0).getByText('TikTok · 9:16', { exact: true }).waitFor();
+
+  const treatmentTracks = page.getByTestId('treatment-tracks');
+  assert.deepEqual(await treatmentTracks.getByRole('listitem').allTextContents(), [
+    'Captions',
+    'Music bed',
+  ]);
+
+  await page.getByRole('checkbox', { name: 'Captions' }).uncheck();
+  await page.getByLabel('Target platform').selectOption('instagram-reels');
+  await page.getByLabel('Aspect ratio').selectOption('1:1');
+  await page.getByRole('button', { name: 'Apply brief' }).click();
+
+  assert.equal(await summaries.count(), 2);
+  assert.deepEqual(await treatmentTracks.getByRole('listitem').allTextContents(), ['Music bed']);
+  assert.equal(await previewFrame.getAttribute('data-aspect-ratio'), '1:1');
+  const squareBounds = await previewFrame.boundingBox();
+  assert.ok(squareBounds, 'square preview frame is visible');
+  assert.ok(
+    Math.abs(squareBounds.width / squareBounds.height - 1) < 0.02,
+    `square frame=${squareBounds.width}x${squareBounds.height}`,
+  );
+
+  await page.getByRole('button', { name: 'Export draft' }).click();
+  const exportSummary = page.getByRole('dialog', { name: 'Export summary' });
+  await exportSummary.getByText('Simulation only', { exact: true }).waitFor();
+  await exportSummary.getByText('Instagram Reels · 1:1', { exact: true }).waitFor();
+  await exportSummary.getByText('Music bed', { exact: true }).waitFor();
+  assert.equal(await page.getByTestId('project-status').textContent(), 'Unexported changes');
+
+  await page.reload();
+  assert.equal(await page.getByTestId('project-status').textContent(), 'All changes local');
+  assert.equal(await page.getByTestId('conversation-summary').count(), 0);
+  assert.equal(await page.getByTestId('preview-frame').getAttribute('data-aspect-ratio'), '16:9');
+  assert.deepEqual(
+    await page.getByTestId('treatment-tracks').getByRole('listitem').allTextContents(),
+    ['Tighten pacing'],
+  );
+  assert.equal(await page.getByRole('dialog', { name: 'Export summary' }).count(), 0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.deepEqual(await page.getByRole('main').evaluate(measureElement), {
+    clientHeight: 900,
+    clientWidth: 1440,
+    scrollHeight: 900,
+    scrollWidth: 1440,
+  });
 });
 
 async function assertSelected(locator, expected) {
   assert.equal(await locator.getAttribute('aria-selected'), String(expected));
   assert.equal((await locator.getAttribute('class')).includes('is-selected'), expected);
+}
+
+function measureElement(element) {
+  return {
+    clientHeight: element.clientHeight,
+    clientWidth: element.clientWidth,
+    scrollHeight: element.scrollHeight,
+    scrollWidth: element.scrollWidth,
+  };
 }
