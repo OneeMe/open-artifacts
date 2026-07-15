@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 
 import type {
@@ -35,6 +35,15 @@ function copyBrief(brief: AgentBrief): AgentBrief {
   return { ...brief, treatments: [...brief.treatments] };
 }
 
+function briefsEqual(left: AgentBrief, right: AgentBrief) {
+  return (
+    left.targetPlatform === right.targetPlatform &&
+    left.aspectRatio === right.aspectRatio &&
+    left.treatments.length === right.treatments.length &&
+    left.treatments.every((treatment) => right.treatments.includes(treatment))
+  );
+}
+
 function formatTime(value: number) {
   const seconds = Math.max(0, value);
   const minutes = Math.floor(seconds / 60);
@@ -44,6 +53,8 @@ function formatTime(value: number) {
 
 export default function VideoEditor({ data }: VideoEditorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const exportDialogRef = useRef<HTMLDialogElement>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(data.media.durationSeconds);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -53,6 +64,14 @@ export default function VideoEditor({ data }: VideoEditorProps) {
   const [conversation, setConversation] = useState<AgentBrief[]>([]);
   const [projectStatus, setProjectStatus] = useState(data.project.status);
   const [exportOpen, setExportOpen] = useState(false);
+
+  useEffect(() => {
+    const dialog = exportDialogRef.current;
+    if (!dialog) return;
+
+    if (exportOpen && !dialog.open) dialog.showModal();
+    if (!exportOpen && dialog.open) dialog.close();
+  }, [exportOpen]);
 
   const selectMedia = () => setSelectedMediaId(data.media.id);
 
@@ -87,6 +106,7 @@ export default function VideoEditor({ data }: VideoEditorProps) {
   };
 
   const applyBrief = () => {
+    if (briefsEqual(draftBrief, activeBrief)) return;
     const appliedBrief = copyBrief(draftBrief);
     setActiveBrief(appliedBrief);
     setConversation((current) => [...current, appliedBrief]);
@@ -94,6 +114,7 @@ export default function VideoEditor({ data }: VideoEditorProps) {
   };
 
   const selected = selectedMediaId === data.media.id;
+  const briefChanged = !briefsEqual(draftBrief, activeBrief);
   const playheadPosition = duration > 0 ? `${(currentTime / duration) * 100}%` : '0%';
 
   return (
@@ -112,7 +133,12 @@ export default function VideoEditor({ data }: VideoEditorProps) {
             {projectStatus}
           </span>
           <button type="button">Share review</button>
-          <button className="ve-primary-action" onClick={() => setExportOpen(true)} type="button">
+          <button
+            className="ve-primary-action"
+            onClick={() => setExportOpen(true)}
+            ref={exportTriggerRef}
+            type="button"
+          >
             Export draft
           </button>
         </div>
@@ -207,7 +233,7 @@ export default function VideoEditor({ data }: VideoEditorProps) {
                   <option value="16:9">16:9</option>
                 </select>
               </label>
-              <button disabled={draftBrief.treatments.length === 0} type="submit">
+              <button disabled={draftBrief.treatments.length === 0 || !briefChanged} type="submit">
                 Apply brief
               </button>
             </form>
@@ -368,24 +394,25 @@ export default function VideoEditor({ data }: VideoEditorProps) {
           </div>
         </section>
       </div>
-      {exportOpen ? (
-        <div
-          aria-label="Export summary"
-          aria-modal="true"
-          className="ve-export-dialog"
-          role="dialog"
-        >
-          <span className="ve-brief-label">Simulation only</span>
-          <h2>Export summary</h2>
-          <strong>
-            {platformLabels[activeBrief.targetPlatform]} · {activeBrief.aspectRatio}
-          </strong>
-          <p>{activeBrief.treatments.map((item) => treatmentLabels[item]).join(', ')}</p>
-          <button onClick={() => setExportOpen(false)} type="button">
-            Close summary
-          </button>
-        </div>
-      ) : null}
+      <dialog
+        aria-label="Export summary"
+        className="ve-export-dialog"
+        onClose={() => {
+          setExportOpen(false);
+          exportTriggerRef.current?.focus();
+        }}
+        ref={exportDialogRef}
+      >
+        <span className="ve-brief-label">Simulation only</span>
+        <h2>Export summary</h2>
+        <strong>
+          {platformLabels[activeBrief.targetPlatform]} · {activeBrief.aspectRatio}
+        </strong>
+        <p>{activeBrief.treatments.map((item) => treatmentLabels[item]).join(', ')}</p>
+        <button onClick={() => setExportOpen(false)} type="button">
+          Close summary
+        </button>
+      </dialog>
     </main>
   );
 }

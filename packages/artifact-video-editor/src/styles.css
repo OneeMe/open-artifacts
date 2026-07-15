@@ -722,16 +722,21 @@
   }
 
   .ve-export-dialog {
-    position: absolute;
-    z-index: 10;
-    top: 70px;
-    right: 14px;
+    position: fixed;
+    inset: 0;
     width: 280px;
+    height: max-content;
+    margin: auto;
     padding: 20px;
     border: 1px solid #3a4655;
     border-radius: 8px;
     background: #151d28;
+    color: var(--ve-ink);
     box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+  }
+
+  .ve-export-dialog::backdrop {
+    background: rgb(3 6 10 / 72%);
   }
 
   .ve-export-dialog h2 {
@@ -774,7 +779,7 @@
     }
 
     .ve-agent-brief li {
-      min-height: 46px;
+      min-height: 42px;
     }
   }
 }

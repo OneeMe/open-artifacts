@@ -85,6 +85,20 @@ test('oa serves a collaborative and synchronized Video Editor Artifact', async (
     await page.getByTestId(surface).waitFor({ state: 'visible' });
   }
 
+  for (const locator of [
+    page.getByTestId('project-bar'),
+    page.getByTestId('agent-surface'),
+    page.getByTestId('media-library'),
+    page.getByTestId('preview-surface'),
+    page.getByTestId('timeline-surface'),
+    page.getByRole('button', { name: 'Export draft' }),
+    page.getByRole('button', { name: 'Apply brief' }),
+    page.getByRole('button', { name: 'Play preview' }),
+    page.getByTestId('timeline-clip-demo-video'),
+  ]) {
+    await assertWithinViewport(locator, { width: 1080, height: 680 });
+  }
+
   const mediaCard = page.getByTestId('media-card-demo-video');
   const timelineClip = page.getByTestId('timeline-clip-demo-video');
   await mediaCard.click();
@@ -125,13 +139,18 @@ test('oa serves a collaborative and synchronized Video Editor Artifact', async (
 
   const previewFrame = page.getByTestId('preview-frame');
   assert.equal(await previewFrame.getAttribute('data-aspect-ratio'), '16:9');
+  await assertAspectRatio(previewFrame, 16 / 9, 'landscape');
+
+  const applyBrief = page.getByRole('button', { name: 'Apply brief' });
+  assert.equal(await applyBrief.isDisabled(), true);
 
   await page.getByRole('checkbox', { name: 'Tighten pacing' }).uncheck();
   await page.getByRole('checkbox', { name: 'Captions' }).check();
   await page.getByRole('checkbox', { name: 'Music bed' }).check();
   await page.getByLabel('Target platform').selectOption('tiktok');
   await page.getByLabel('Aspect ratio').selectOption('9:16');
-  await page.getByRole('button', { name: 'Apply brief' }).click();
+  assert.equal(await applyBrief.isDisabled(), false);
+  await applyBrief.click();
 
   assert.equal(await page.getByTestId('project-status').textContent(), 'Unexported changes');
   assert.equal(await previewFrame.getAttribute('data-aspect-ratio'), '9:16');
@@ -141,15 +160,11 @@ test('oa serves a collaborative and synchronized Video Editor Artifact', async (
     ),
     '9 / 16',
   );
-  const portraitBounds = await previewFrame.boundingBox();
-  assert.ok(portraitBounds, 'portrait preview frame is visible');
-  assert.ok(
-    Math.abs(portraitBounds.width / portraitBounds.height - 9 / 16) < 0.02,
-    `portrait frame=${portraitBounds.width}x${portraitBounds.height}`,
-  );
+  await assertAspectRatio(previewFrame, 9 / 16, 'portrait');
 
   const summaries = page.getByTestId('conversation-summary');
   assert.equal(await summaries.count(), 1);
+  assert.equal(await applyBrief.isDisabled(), true);
   await summaries.nth(0).getByText('Captions, Music bed', { exact: true }).waitFor();
   await summaries.nth(0).getByText('TikTok · 9:16', { exact: true }).waitFor();
 
@@ -162,24 +177,31 @@ test('oa serves a collaborative and synchronized Video Editor Artifact', async (
   await page.getByRole('checkbox', { name: 'Captions' }).uncheck();
   await page.getByLabel('Target platform').selectOption('instagram-reels');
   await page.getByLabel('Aspect ratio').selectOption('1:1');
-  await page.getByRole('button', { name: 'Apply brief' }).click();
+  assert.equal(await applyBrief.isDisabled(), false);
+  await applyBrief.click();
 
   assert.equal(await summaries.count(), 2);
   assert.deepEqual(await treatmentTracks.getByRole('listitem').allTextContents(), ['Music bed']);
   assert.equal(await previewFrame.getAttribute('data-aspect-ratio'), '1:1');
-  const squareBounds = await previewFrame.boundingBox();
-  assert.ok(squareBounds, 'square preview frame is visible');
-  assert.ok(
-    Math.abs(squareBounds.width / squareBounds.height - 1) < 0.02,
-    `square frame=${squareBounds.width}x${squareBounds.height}`,
-  );
+  await assertAspectRatio(previewFrame, 1, 'square');
+  assert.equal(await applyBrief.isDisabled(), true);
 
-  await page.getByRole('button', { name: 'Export draft' }).click();
+  const exportDraft = page.getByRole('button', { name: 'Export draft' });
+  await exportDraft.focus();
+  await exportDraft.click();
   const exportSummary = page.getByRole('dialog', { name: 'Export summary' });
   await exportSummary.getByText('Simulation only', { exact: true }).waitFor();
   await exportSummary.getByText('Instagram Reels · 1:1', { exact: true }).waitFor();
   await exportSummary.getByText('Music bed', { exact: true }).waitFor();
   assert.equal(await page.getByTestId('project-status').textContent(), 'Unexported changes');
+  assert.equal(await exportSummary.evaluate((element) => element.localName), 'dialog');
+  assert.equal(await exportSummary.evaluate((element) => element.matches(':modal')), true);
+  await page.keyboard.press('Escape');
+  await exportSummary.waitFor({ state: 'hidden' });
+  assert.equal(
+    await exportDraft.evaluate((element) => element === element.ownerDocument.activeElement),
+    true,
+  );
 
   await page.reload();
   assert.equal(await page.getByTestId('project-status').textContent(), 'All changes local');
@@ -203,6 +225,36 @@ test('oa serves a collaborative and synchronized Video Editor Artifact', async (
 async function assertSelected(locator, expected) {
   assert.equal(await locator.getAttribute('aria-selected'), String(expected));
   assert.equal((await locator.getAttribute('class')).includes('is-selected'), expected);
+}
+
+async function assertAspectRatio(locator, expected, label) {
+  const bounds = await locator.boundingBox();
+  assert.ok(bounds, `${label} preview frame is visible`);
+  assert.ok(
+    Math.abs(bounds.width / bounds.height - expected) < 0.02,
+    `${label} frame=${bounds.width}x${bounds.height}`,
+  );
+}
+
+async function assertWithinViewport(locator, viewport) {
+  const bounds = await locator.boundingBox();
+  const description = await locator.evaluate(
+    (element) =>
+      element.getAttribute('data-testid') ??
+      element.getAttribute('aria-label') ??
+      element.textContent,
+  );
+  assert.ok(bounds, 'key editor element is visible');
+  assert.ok(bounds.x >= 0, `${description} starts left of viewport: x=${bounds.x}`);
+  assert.ok(bounds.y >= 0, `${description} starts above viewport: y=${bounds.y}`);
+  assert.ok(
+    bounds.x + bounds.width <= viewport.width,
+    `${description} extends beyond viewport width`,
+  );
+  assert.ok(
+    bounds.y + bounds.height <= viewport.height,
+    `${description} extends beyond viewport height: bottom=${bounds.y + bounds.height}`,
+  );
 }
 
 function measureElement(element) {
