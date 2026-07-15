@@ -149,7 +149,10 @@ export async function readProcessSignature(
     const { stdout } = await execFileAsync(
       '/bin/ps',
       ['-ww', '-p', String(pid), '-o', 'uid=', '-o', 'lstart=', '-o', 'command='],
-      { encoding: 'utf8' },
+      {
+        encoding: 'utf8',
+        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      },
     );
     return parseProcessSignatureOutput(stdout);
   } catch {

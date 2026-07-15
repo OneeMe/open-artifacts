@@ -19,29 +19,29 @@ function buildCli() {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
 
-function runCli(arguments_, home) {
+function runCli(arguments_, home, environment = {}) {
   return spawnSync(process.execPath, [cliEntry, ...arguments_], {
     cwd: repositoryRoot,
     encoding: 'utf8',
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, ...environment, HOME: home },
     timeout: 10_000,
   });
 }
 
-function startSession(home) {
-  const result = runCli(['run', artifactRoot, '--json', '--no-open'], home);
+function startSession(home, environment) {
+  const result = runCli(['run', artifactRoot, '--json', '--no-open'], home, environment);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
 
-function listSessions(home) {
-  const result = runCli(['session', 'list', '--json'], home);
+function listSessions(home, environment) {
+  const result = runCli(['session', 'list', '--json'], home, environment);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
 
-function stopSession(home, sessionId) {
-  return runCli(['session', 'stop', sessionId, '--json'], home);
+function stopSession(home, sessionId, environment) {
+  return runCli(['session', 'stop', sessionId, '--json'], home, environment);
 }
 
 async function sessionRecord(home, sessionId) {
@@ -156,6 +156,29 @@ test('run, list, and stop manage concurrent Active Sessions independently', asyn
   const emptyHumanList = runCli(['session', 'list'], home);
   assert.equal(emptyHumanList.status, 0, emptyHumanList.stderr);
   assert.equal(emptyHumanList.stdout, 'No Active Artifact Sessions.\n');
+});
+
+test('process ownership remains stable when Session commands use different timezones', async (t) => {
+  buildCli();
+  const home = await mkdtemp(join(tmpdir(), 'open-artifacts-timezone-'));
+  const session = startSession(home, { TZ: 'UTC' });
+
+  t.after(async () => {
+    stopSession(home, session.sessionId, { TZ: 'UTC' });
+    await rm(home, { force: true, recursive: true });
+  });
+
+  assert.deepEqual(
+    listSessions(home, { TZ: 'America/New_York' }).sessions.map(({ sessionId }) => sessionId),
+    [session.sessionId],
+  );
+
+  const stopped = stopSession(home, session.sessionId, { TZ: 'Asia/Shanghai' });
+  assert.equal(stopped.status, 0, stopped.stderr || stopped.stdout);
+  assert.deepEqual(JSON.parse(stopped.stdout), {
+    sessionId: session.sessionId,
+    status: 'stopped',
+  });
 });
 
 test('list prunes nonexistent, misowned, unreachable, and malformed Session Records', async (t) => {
