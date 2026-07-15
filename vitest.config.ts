@@ -3,8 +3,10 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     coverage: {
+      exclude: ['**/*.d.ts'],
+      include: ['apps/*/src/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'],
       provider: 'v8',
-      reporter: ['text', 'json', 'lcov'],
+      reporter: ['json-summary', 'lcov'],
       reportsDirectory: './coverage',
     },
     exclude: [...configDefaults.exclude, 'e2e/**', 'evals/**'],
