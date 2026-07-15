@@ -387,6 +387,7 @@ async function runNpm(cwd: string, arguments_: string[]) {
   try {
     const command = npmSubprocessCommand([
       ...arguments_,
+      '--legacy-peer-deps=false',
       '--workspaces=false',
       '--include-workspace-root=false',
     ]);
@@ -396,7 +397,8 @@ async function runNpm(cwd: string, arguments_: string[]) {
         key.toLowerCase() === 'npm_config_workspace' ||
         key.toLowerCase() === 'npm_config_workspace[]' ||
         key.toLowerCase() === 'npm_config_workspaces' ||
-        key.toLowerCase() === 'npm_config_include_workspace_root'
+        key.toLowerCase() === 'npm_config_include_workspace_root' ||
+        key.toLowerCase() === 'npm_config_legacy_peer_deps'
       ) {
         delete environment[key];
       }

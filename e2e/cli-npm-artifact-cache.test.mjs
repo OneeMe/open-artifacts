@@ -244,7 +244,7 @@ test('oa inherits project npm config without persisting registry credentials', a
     writeFile(globalConfig, `registry=${registry.origin}/\n`),
     writeFile(
       join(projectRoot, '.npmrc'),
-      `@oa-fixture:registry=${registry.origin}/\nlockfile-version=1\nworkspaces=true\nworkspace=missing\n//127.0.0.1:${new URL(registry.origin).port}/:_authToken=fixture-token-secret\n`,
+      `@oa-fixture:registry=${registry.origin}/\nlegacy-peer-deps=true\nlockfile-version=1\nworkspaces=true\nworkspace=missing\n//127.0.0.1:${new URL(registry.origin).port}/:_authToken=fixture-token-secret\n`,
     ),
     writeFile(
       join(projectRoot, 'package.json'),
@@ -257,8 +257,10 @@ test('oa inherits project npm config without persisting registry credentials', a
     {
       cwd: projectRoot,
       env: {
+        npm_config_legacy_peer_deps: 'true',
         npm_config_globalconfig: globalConfig,
         npm_config_userconfig: join(home, '.npmrc'),
+        NPM_CONFIG_LEGACY_PEER_DEPS: 'true',
         NPM_CONFIG_GLOBALCONFIG: globalConfig,
         NPM_CONFIG_USERCONFIG: join(home, '.npmrc'),
       },
