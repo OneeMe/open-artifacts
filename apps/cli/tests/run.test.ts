@@ -21,7 +21,10 @@ afterEach(async () => {
   );
 });
 
-async function createArtifactFixture(format = 'react-render/v0') {
+async function createArtifactFixture(
+  format = 'react-render/v0',
+  source = 'export default function UnitFixture({ data }: { data: unknown }) { void data; return null; }\n',
+) {
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'open-artifacts-unit-'));
   const artifactRoot = join(fixtureRoot, 'artifact');
   temporaryDirectories.push(fixtureRoot);
@@ -59,10 +62,7 @@ async function createArtifactFixture(format = 'react-render/v0') {
       '# Unit fixture\n\nRenders Artifact Input shaped as `{ message: string }` with React. React is provided as a peer dependency. Copy the directory to create a Local Fork.\n',
     ),
     writeFile(join(artifactRoot, 'tsconfig.json'), '{}\n'),
-    writeFile(
-      join(artifactRoot, 'src/index.tsx'),
-      'export default function UnitFixture({ data }: { data: unknown }) { void data; return null; }\n',
-    ),
+    writeFile(join(artifactRoot, 'src/index.tsx'), source),
   ]);
   return { artifactRoot, fixtureRoot };
 }
@@ -102,6 +102,33 @@ describe('local Artifact Package resolution', () => {
     await expect(
       resolveLocalArtifactPackage(fixture.artifactRoot, fixture.fixtureRoot),
     ).rejects.toThrow(/does not satisfy react-render\/v0/);
+  });
+
+  it('rejects a default export that is not a React component', async () => {
+    const fixture = await createArtifactFixture('react-render/v0', 'export default 42;\n');
+
+    await expect(
+      resolveLocalArtifactPackage(fixture.artifactRoot, fixture.fixtureRoot),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ message: 'default export must be a React component' })],
+    });
+  });
+
+  it('rejects an Example Input that cannot complete a smoke Render', async () => {
+    const fixture = await createArtifactFixture(
+      'react-render/v0',
+      `export default function Broken({ data }: { data: { message: string } }) { throw new Error(data.message); }\n`,
+    );
+
+    await expect(
+      resolveLocalArtifactPackage(fixture.artifactRoot, fixture.fixtureRoot),
+    ).rejects.toMatchObject({
+      issues: [
+        expect.objectContaining({
+          message: 'Example Input must complete a smoke Render through the default export',
+        }),
+      ],
+    });
   });
 });
 

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { buildCli, runBuiltCli } from './helpers/cli.mjs';
+import { buildCli, repositoryRoot, runBuiltCli } from './helpers/cli.mjs';
 
 async function createArtifactPackage(home, overrides = {}) {
   const root = join(home, overrides.directory ?? 'artifact');
@@ -180,6 +180,22 @@ test('oa run rejects each required Artifact Package Contract boundary', async (t
       expectedPath: '$.exports["."]',
     },
     {
+      name: 'default export that is not a React component',
+      arrange: (home) =>
+        createArtifactPackage(home, {
+          source: 'export default 42;\n',
+        }),
+      expectedPath: '$.exports["."]',
+    },
+    {
+      name: 'Example Input that throws during the smoke Render',
+      arrange: (home) =>
+        createArtifactPackage(home, {
+          source: 'export default function Broken({ data }) { throw new Error(data.message); }\n',
+        }),
+      expectedPath: '$.example',
+    },
+    {
       name: 'wrong JSON Schema draft',
       arrange: (home) =>
         createArtifactPackage(home, {
@@ -236,13 +252,31 @@ test('oa run validates Example Input against the Input Contract before process c
 
 test('oa run reports startup failure and removes the incomplete Artifact Session', async (t) => {
   const home = await mkdtemp(join(tmpdir(), 'open-artifacts-session-failure-'));
-  t.after(() => rm(home, { force: true, recursive: true }));
-  const artifactRoot = await createArtifactPackage(home, {
-    source: `import Missing from './missing.tsx';\nexport default Missing;\n`,
+  const cliCopyRoot = await mkdtemp(
+    join(resolve(repositoryRoot, 'apps/cli'), '.runtime-failure-cli-'),
+  );
+  t.after(async () => {
+    await Promise.all([
+      rm(home, { force: true, recursive: true }),
+      rm(cliCopyRoot, { force: true, recursive: true }),
+    ]);
   });
+  const artifactRoot = await createArtifactPackage(home);
+  await cp(resolve(repositoryRoot, 'apps/cli/dist'), join(cliCopyRoot, 'dist'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(cliCopyRoot, 'dist/runtime/index.js'),
+    'throw new Error("injected failure before readiness");\n',
+  );
+  const cliEntry = join(cliCopyRoot, 'dist/cli/index.js');
 
   const error = parseJsonError(
-    runBuiltCli(['run', artifactRoot, '--json', '--no-open'], { home, timeout: 10_000 }),
+    runBuiltCli(['run', artifactRoot, '--json', '--no-open'], {
+      entry: cliEntry,
+      home,
+      timeout: 10_000,
+    }),
   );
 
   assert.equal(error.error.code, 'ARTIFACT_SESSION_START_FAILED');
@@ -252,6 +286,7 @@ test('oa run reports startup failure and removes the incomplete Artifact Session
   assertNoSessionProcessForHome(home);
 
   const humanResult = runBuiltCli(['run', artifactRoot, '--no-open'], {
+    entry: cliEntry,
     home,
     timeout: 10_000,
   });

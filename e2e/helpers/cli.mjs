@@ -14,7 +14,7 @@ export function buildCli() {
 }
 
 export function runBuiltCli(arguments_, options = {}) {
-  return spawnSync(process.execPath, [cliEntry, ...arguments_], {
+  return spawnSync(process.execPath, [options.entry ?? cliEntry, ...arguments_], {
     cwd: options.cwd ?? repositoryRoot,
     encoding: 'utf8',
     env: { ...process.env, HOME: options.home ?? process.env.HOME },

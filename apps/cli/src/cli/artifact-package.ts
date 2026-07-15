@@ -1,13 +1,18 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 import Ajv2020Import from 'ajv/dist/2020.js';
 import type { AnySchema, ErrorObject, ValidateFunction } from 'ajv';
 import type { Ajv2020 as Ajv2020Constructor } from 'ajv/dist/2020.js';
 import { init as initModuleLexer, parse as parseModule } from 'es-module-lexer';
-import { transformWithOxc } from 'vite';
+import { createElement } from 'react';
+import type { ComponentType } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createServer, normalizePath, transformWithOxc } from 'vite';
 
 import type { ArtifactIdentity } from '../runtime/config.js';
+import { reactResolutionRoot } from '../runtime/react.js';
 import { ArtifactPackageContractError, ArtifactReferenceError, type CliIssue } from './errors.js';
 
 const inputSchemaDraft = 'https://json-schema.org/draft/2020-12/schema';
@@ -197,6 +202,67 @@ async function validateArtifactSource(entryPath: string) {
   }
 }
 
+async function smokeRenderArtifactSource(
+  artifactRoot: string,
+  entryPath: string,
+  exampleInput: unknown,
+) {
+  const runtimeRoot = reactResolutionRoot();
+  const cacheDirectory = await mkdtemp(resolve(tmpdir(), 'open-artifacts-smoke-render-'));
+  let server: Awaited<ReturnType<typeof createServer>> | undefined;
+
+  try {
+    server = await createServer({
+      appType: 'custom',
+      cacheDir: cacheDirectory,
+      clearScreen: false,
+      logLevel: 'silent',
+      resolve: { dedupe: ['react', 'react-dom'] },
+      root: runtimeRoot,
+      server: {
+        middlewareMode: true,
+        fs: { allow: [artifactRoot, runtimeRoot] },
+      },
+    });
+    const artifactModule = (await server.ssrLoadModule(`/@fs/${normalizePath(entryPath)}`)) as {
+      default?: unknown;
+    };
+    if (typeof artifactModule.default !== 'function') {
+      throw new ArtifactPackageContractError([
+        {
+          path: '$.exports["."]',
+          message: 'default export must be a React component',
+        },
+      ]);
+    }
+
+    try {
+      const Render = artifactModule.default as ComponentType<{ data: unknown }>;
+      renderToStaticMarkup(createElement(Render, { data: exampleInput }));
+    } catch {
+      throw new ArtifactPackageContractError([
+        {
+          path: '$.example',
+          message: 'Example Input must complete a smoke Render through the default export',
+        },
+      ]);
+    }
+  } catch (error) {
+    if (error instanceof ArtifactPackageContractError) throw error;
+    throw new ArtifactPackageContractError([
+      {
+        path: '$.exports["."]',
+        message: `default export must load through the public Artifact Source entry${
+          error instanceof Error ? `: ${error.message}` : ''
+        }`,
+      },
+    ]);
+  } finally {
+    await server?.close();
+    await rm(cacheDirectory, { force: true, recursive: true });
+  }
+}
+
 export async function resolveLocalArtifactPackage(
   reference: string,
   cwd: string,
@@ -268,6 +334,7 @@ export async function resolveLocalArtifactPackage(
       formatValidationIssues(validateInput.errors, '$.example'),
     );
   }
+  await smokeRenderArtifactSource(root, resources['src/index.tsx'], exampleInput);
 
   return {
     exampleInput,
