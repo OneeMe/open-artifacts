@@ -4,6 +4,7 @@ import {
   healthMatchesRecord,
   parseProcessSignatureOutput,
   parseSessionRecord,
+  parseWindowsProcessSignatureOutput,
 } from '../src/cli/session.js';
 
 const record = {
@@ -17,8 +18,8 @@ const record = {
   pid: 123,
   processSignature: {
     command: '/usr/bin/node runtime.js config.json secret-token',
+    owner: '501',
     startedAt: 'Wed Jul 15 12:34:56 2026',
-    uid: 501,
   },
   sessionId: 'session-id',
   startedAt: '2026-07-15T04:34:56.000Z',
@@ -47,6 +48,23 @@ describe('process and health ownership', () => {
         '  501 Wed Jul 15 12:34:56 2026 /usr/bin/node runtime.js config.json secret-token\n',
       ),
     ).toEqual(record.processSignature);
+  });
+
+  it('parses a Windows process identity with its owner SID and command line', () => {
+    expect(
+      parseWindowsProcessSignatureOutput(
+        JSON.stringify({
+          CommandLine: '"C:\\Program Files\\nodejs\\node.exe" runtime.js config.json secret-token',
+          CreationDate: '20260715123456.123456+480',
+          ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe',
+          OwnerSid: 'S-1-5-21-111-222-333-1001',
+        }),
+      ),
+    ).toEqual({
+      command: '"C:\\Program Files\\nodejs\\node.exe" runtime.js config.json secret-token',
+      owner: 'S-1-5-21-111-222-333-1001',
+      startedAt: '20260715123456.123456+480',
+    });
   });
 
   it('requires the Runtime health tuple to match the Session Record exactly', () => {

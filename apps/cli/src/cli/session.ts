@@ -11,8 +11,8 @@ const sessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export interface ProcessSignature {
   command: string;
+  owner: string;
   startedAt: string;
-  uid: number;
 }
 
 export interface SessionRecord {
@@ -81,9 +81,8 @@ export function parseSessionRecord(value: unknown): SessionRecord | undefined {
     !Number.isSafeInteger(value.pid) ||
     (value.pid as number) <= 0 ||
     !isNonEmptyString(signature.command) ||
+    !isNonEmptyString(signature.owner) ||
     !isNonEmptyString(signature.startedAt) ||
-    !Number.isSafeInteger(signature.uid) ||
-    (signature.uid as number) < 0 ||
     !isNonEmptyString(value.sessionId) ||
     !isNonEmptyString(value.startedAt) ||
     Number.isNaN(Date.parse(value.startedAt as string)) ||
@@ -103,11 +102,50 @@ export function parseProcessSignatureOutput(output: string): ProcessSignature | 
   if (!uidText || !startedAt || !command) return undefined;
   const uid = Number(uidText);
   if (!Number.isSafeInteger(uid) || uid < 0) return undefined;
-  return { command, startedAt, uid };
+  return { command, owner: String(uid), startedAt };
 }
 
-export async function readProcessSignature(pid: number): Promise<ProcessSignature | undefined> {
+export function parseWindowsProcessSignatureOutput(output: string): ProcessSignature | undefined {
   try {
+    const value: unknown = JSON.parse(output);
+    if (
+      !isRecord(value) ||
+      !isNonEmptyString(value.CommandLine) ||
+      !isNonEmptyString(value.CreationDate) ||
+      !isNonEmptyString(value.OwnerSid)
+    ) {
+      return undefined;
+    }
+    return {
+      command: value.CommandLine,
+      owner: value.OwnerSid,
+      startedAt: value.CreationDate,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readProcessSignature(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+): Promise<ProcessSignature | undefined> {
+  try {
+    if (platform === 'win32') {
+      const script = [
+        `$process = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'`,
+        'if ($null -eq $process) { exit 1 }',
+        '$owner = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid',
+        '[pscustomobject]@{ CommandLine = $process.CommandLine; CreationDate = $process.CreationDate; OwnerSid = $owner.Sid } | ConvertTo-Json -Compress',
+      ].join('; ');
+      const { stdout } = await execFileAsync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        { encoding: 'utf8' },
+      );
+      return parseWindowsProcessSignatureOutput(stdout);
+    }
+
     const { stdout } = await execFileAsync(
       '/bin/ps',
       ['-ww', '-p', String(pid), '-o', 'uid=', '-o', 'lstart=', '-o', 'command='],
@@ -121,7 +159,9 @@ export async function readProcessSignature(pid: number): Promise<ProcessSignatur
 
 function signaturesMatch(left: ProcessSignature, right: ProcessSignature) {
   return (
-    left.command === right.command && left.startedAt === right.startedAt && left.uid === right.uid
+    left.command === right.command &&
+    left.owner === right.owner &&
+    left.startedAt === right.startedAt
   );
 }
 
