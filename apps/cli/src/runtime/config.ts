@@ -7,7 +7,7 @@ export interface ArtifactIdentity {
 
 export interface SessionRuntimeConfig {
   artifact: ArtifactIdentity;
-  exampleData: unknown;
+  exampleInput: unknown;
   readyFile: string;
   sessionDirectory: string;
   sessionId: string;

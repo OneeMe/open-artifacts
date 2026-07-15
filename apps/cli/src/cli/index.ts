@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 
-import { runArtifact } from './run.js';
+import { runArtifactPackage } from './run.js';
 
 const program = new Command();
 
@@ -18,7 +18,7 @@ program
   .option('--json', 'emit stable machine-readable output', false)
   .option('--no-open', 'do not open the system browser')
   .action(async (artifact: string, options: { json: boolean; open: boolean }) => {
-    await runArtifact(artifact, options);
+    await runArtifactPackage(artifact, options);
   });
 
 await program.parseAsync();

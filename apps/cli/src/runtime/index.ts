@@ -39,6 +39,24 @@ function artifactSessionPlugin(config: SessionRuntimeConfig): Plugin {
           }),
         );
       });
+      server.middlewares.use('/__oa/preflight', async (_request, response) => {
+        try {
+          const [sessionEntry, artifactEntry] = await Promise.all([
+            server.transformRequest(virtualEntryId),
+            server.transformRequest(entryUrl),
+          ]);
+          if (!sessionEntry || !artifactEntry) {
+            throw new Error('Vite could not load the Render entry modules');
+          }
+          response.statusCode = 200;
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ status: 'ready' }));
+        } catch (error) {
+          response.statusCode = 500;
+          response.setHeader('content-type', 'text/plain; charset=utf-8');
+          response.end(error instanceof Error ? error.message : String(error));
+        }
+      });
     },
     load(id) {
       if (id !== resolvedVirtualEntryId) return undefined;
@@ -48,7 +66,7 @@ import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import Render from ${JSON.stringify(entryUrl)};
 
-const data = ${JSON.stringify(config.exampleData)};
+const data = ${JSON.stringify(config.exampleInput)};
 const root = document.getElementById('root');
 if (!root) throw new Error('Open Artifacts Runtime root is missing');
 createRoot(root).render(createElement(Render, { data }));
@@ -69,6 +87,11 @@ async function startRuntime(config: SessionRuntimeConfig) {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${config.artifact.name}</title>
+    <style>
+      html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+      body { min-height: 100vh; }
+      #root { min-height: 100vh; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

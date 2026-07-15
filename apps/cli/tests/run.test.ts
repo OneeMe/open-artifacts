@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveLocalArtifact, waitForRuntime } from '../src/cli/run.js';
+import { resolveLocalArtifactPackage, waitForRuntime } from '../src/cli/run.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -46,23 +46,23 @@ async function createArtifactFixture(format = 'react-render/v0') {
   return { artifactRoot, fixtureRoot };
 }
 
-describe('local Artifact resolution', () => {
+describe('local Artifact Package resolution', () => {
   it('resolves explicit relative references and loads Package-owned Example Input', async () => {
     const fixture = await createArtifactFixture();
-    const artifact = await resolveLocalArtifact('./artifact', fixture.fixtureRoot);
+    const artifactPackage = await resolveLocalArtifactPackage('./artifact', fixture.fixtureRoot);
 
-    expect(artifact.identity).toMatchObject({
+    expect(artifactPackage.identity).toMatchObject({
       name: '@open-artifacts/unit-fixture',
       version: '0.0.0',
     });
-    expect(artifact.identity.root).toBe(
+    expect(artifactPackage.identity.root).toBe(
       await import('node:fs/promises').then(({ realpath }) => realpath(fixture.artifactRoot)),
     );
-    expect(artifact.exampleData).toEqual({ message: 'hello' });
+    expect(artifactPackage.exampleInput).toEqual({ message: 'hello' });
   });
 
   it('keeps bare npm-like references outside the local tracer bullet', async () => {
-    await expect(resolveLocalArtifact('@scope/package', process.cwd())).rejects.toThrow(
+    await expect(resolveLocalArtifactPackage('@scope/package', process.cwd())).rejects.toThrow(
       /explicit local Artifact References only/,
     );
   });
@@ -70,9 +70,9 @@ describe('local Artifact resolution', () => {
   it('rejects an unsupported Artifact format before creating a Session', async () => {
     const fixture = await createArtifactFixture('render-package/v0');
 
-    await expect(resolveLocalArtifact(fixture.artifactRoot, fixture.fixtureRoot)).rejects.toThrow(
-      /Unsupported Artifact Package format/,
-    );
+    await expect(
+      resolveLocalArtifactPackage(fixture.artifactRoot, fixture.fixtureRoot),
+    ).rejects.toThrow(/Unsupported Artifact Package format/);
   });
 });
 
@@ -108,5 +108,32 @@ describe('Runtime readiness', () => {
     await writeFile(readyFile, JSON.stringify({ pid: process.pid + 1, url: 'http://127.0.0.1/' }));
 
     await expect(waitForRuntime(readyFile, process.pid)).rejects.toThrow(/identity mismatch/);
+  });
+
+  it('rejects a Runtime whose Render entry fails preflight', async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), 'open-artifacts-preflight-failure-'));
+    temporaryDirectories.push(fixtureRoot);
+    const readyFile = join(fixtureRoot, 'ready.json');
+    const server = createServer((request, response) => {
+      response.statusCode = request.url === '/__oa/preflight' ? 500 : 200;
+      response.end(request.url === '/__oa/preflight' ? 'Render import failed' : 'ok');
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Test server did not bind');
+    await writeFile(
+      readyFile,
+      JSON.stringify({ pid: process.pid, url: `http://127.0.0.1:${address.port}/` }),
+    );
+
+    try {
+      await expect(waitForRuntime(readyFile, process.pid)).rejects.toThrow(
+        /Artifact Render preflight failed: Render import failed/,
+      );
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) =>
+        server.close((error) => (error ? rejectClose(error) : resolveClose())),
+      );
+    }
   });
 });

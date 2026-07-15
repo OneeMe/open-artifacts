@@ -25,8 +25,8 @@ interface RunOptions {
   open: boolean;
 }
 
-interface ResolvedArtifact {
-  exampleData: unknown;
+interface ResolvedArtifactPackage {
+  exampleInput: unknown;
   identity: ArtifactIdentity;
 }
 
@@ -47,10 +47,10 @@ function resolvePackageFile(root: string, packagePath: string) {
   return resolved;
 }
 
-export async function resolveLocalArtifact(
+export async function resolveLocalArtifactPackage(
   reference: string,
   cwd: string,
-): Promise<ResolvedArtifact> {
+): Promise<ResolvedArtifactPackage> {
   const isExplicitRelative = reference.startsWith('./') || reference.startsWith('../');
   if (!isExplicitRelative && !isAbsolute(reference)) {
     throw new Error(
@@ -77,7 +77,7 @@ export async function resolveLocalArtifact(
     throw new Error(`Artifact Package exports are incomplete in ${root}`);
 
   return {
-    exampleData: JSON.parse(await readFile(resolvePackageFile(root, exampleExport), 'utf8')),
+    exampleInput: JSON.parse(await readFile(resolvePackageFile(root, exampleExport), 'utf8')),
     identity: {
       entryPath: resolvePackageFile(root, entryExport),
       name: manifest.name,
@@ -100,8 +100,14 @@ export async function waitForRuntime(
 
     if (ready) {
       if (ready.pid !== childPid) throw new Error('Artifact Session Runtime identity mismatch');
-      const response = await fetch(`${ready.url}__oa/health`).catch(() => undefined);
-      if (response?.ok) return ready;
+      const [pageResponse, preflightResponse] = await Promise.all([
+        fetch(ready.url).catch(() => undefined),
+        fetch(`${ready.url}__oa/preflight`).catch(() => undefined),
+      ]);
+      if (pageResponse?.ok && preflightResponse?.ok) return ready;
+      if (preflightResponse && preflightResponse.status >= 500) {
+        throw new Error(`Artifact Render preflight failed: ${await preflightResponse.text()}`);
+      }
     }
 
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
@@ -118,14 +124,14 @@ function openBrowser(url: string) {
   child.unref();
 }
 
-export async function runArtifact(reference: string, options: RunOptions) {
-  const artifact = await resolveLocalArtifact(reference, process.cwd());
+export async function runArtifactPackage(reference: string, options: RunOptions) {
+  const artifactPackage = await resolveLocalArtifactPackage(reference, process.cwd());
   const sessionId = randomUUID();
   const sessionDirectory = resolve(homedir(), '.open-artifacts', 'sessions', sessionId);
   const readyFile = resolve(sessionDirectory, 'ready.json');
   const runtimeConfig: SessionRuntimeConfig = {
-    artifact: artifact.identity,
-    exampleData: artifact.exampleData,
+    artifact: artifactPackage.identity,
+    exampleInput: artifactPackage.exampleInput,
     readyFile,
     sessionDirectory,
     sessionId,
@@ -138,7 +144,7 @@ export async function runArtifact(reference: string, options: RunOptions) {
   const log = await open(logPath, 'a');
   const runtimeEntry = fileURLToPath(new URL('../runtime/index.js', import.meta.url));
   const child = spawn(process.execPath, [runtimeEntry, configPath], {
-    cwd: artifact.identity.root,
+    cwd: artifactPackage.identity.root,
     detached: true,
     stdio: ['ignore', log.fd, log.fd],
   });
@@ -153,7 +159,7 @@ export async function runArtifact(reference: string, options: RunOptions) {
   try {
     const ready = await waitForRuntime(readyFile, child.pid);
     const record: SessionRecord = {
-      artifact: artifact.identity,
+      artifact: artifactPackage.identity,
       pid: ready.pid,
       sessionId,
       startedAt: new Date().toISOString(),
@@ -166,9 +172,9 @@ export async function runArtifact(reference: string, options: RunOptions) {
 
     const result = {
       artifact: {
-        name: artifact.identity.name,
-        root: artifact.identity.root,
-        version: artifact.identity.version,
+        name: artifactPackage.identity.name,
+        root: artifactPackage.identity.root,
+        version: artifactPackage.identity.version,
       },
       sessionId,
       url: ready.url,
@@ -178,7 +184,7 @@ export async function runArtifact(reference: string, options: RunOptions) {
     process.stdout.write(
       options.json
         ? `${JSON.stringify(result)}\n`
-        : `Artifact Session ${sessionId}\n${artifact.identity.name}\n${ready.url}\n`,
+        : `Artifact Session ${sessionId}\n${artifactPackage.identity.name}\n${ready.url}\n`,
     );
   } catch (error) {
     try {

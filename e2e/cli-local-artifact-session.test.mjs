@@ -118,9 +118,15 @@ test('oa run starts local Artifact Packages from relative and absolute reference
       status: 'active',
     });
 
+    const preflightResponse = await globalThis.fetch(`${session.url}__oa/preflight`);
+    assert.equal(preflightResponse.status, 200);
+    assert.deepEqual(await preflightResponse.json(), { status: 'ready' });
+
     const pageResponse = await globalThis.fetch(session.url);
     assert.equal(pageResponse.status, 200);
-    assert.match(await pageResponse.text(), /<div id="root"><\/div>/);
+    const page = await pageResponse.text();
+    assert.match(page, /<div id="root"><\/div>/);
+    assert.match(page, /#root \{ min-height: 100vh; \}/);
   }
 
   assert.equal(new Set(results.map(({ sessionId }) => sessionId)).size, references.length);
