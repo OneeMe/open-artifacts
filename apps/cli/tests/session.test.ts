@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   healthMatchesRecord,
+  parseLinuxProcessSignature,
   parseProcessSignatureOutput,
   parseSessionRecord,
   parseWindowsProcessSignatureOutput,
@@ -64,6 +65,43 @@ describe('process and health ownership', () => {
       command: '"C:\\Program Files\\nodejs\\node.exe" runtime.js config.json secret-token',
       owner: 'S-1-5-21-111-222-333-1001',
       startedAt: '20260715123456.123456+480',
+    });
+  });
+
+  it('parses a Linux procfs identity without depending on ps output', () => {
+    const statFields = [
+      'S',
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '10',
+      '11',
+      '12',
+      '13',
+      '14',
+      '15',
+      '16',
+      '17',
+      '18',
+      '987654',
+    ];
+
+    expect(
+      parseLinuxProcessSignature(
+        `123 (node worker) ${statFields.join(' ')} 20 21\n`,
+        'Name:\tnode\nUid:\t1000\t1000\t1000\t1000\n',
+        '/usr/bin/node\0runtime.js\0config.json\0secret-token\0',
+      ),
+    ).toEqual({
+      command: '/usr/bin/node\0runtime.js\0config.json\0secret-token',
+      owner: '1000',
+      startedAt: 'linux:987654',
     });
   });
 

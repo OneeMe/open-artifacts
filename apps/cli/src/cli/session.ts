@@ -113,6 +113,26 @@ export function parseProcessSignatureOutput(output: string): ProcessSignature | 
   return { command, owner: String(uid), startedAt };
 }
 
+export function parseLinuxProcessSignature(
+  statOutput: string,
+  statusOutput: string,
+  commandOutput: string,
+): ProcessSignature | undefined {
+  const commandEnd = statOutput.lastIndexOf(')');
+  if (commandEnd < 0) return undefined;
+
+  const statFields = statOutput
+    .slice(commandEnd + 1)
+    .trim()
+    .split(/\s+/);
+  const startedAt = statFields[19];
+  const owner = /^Uid:\s+(\d+)(?:\s|$)/m.exec(statusOutput)?.[1];
+  const command = commandOutput.replace(/\0$/, '');
+  if (!startedAt || !owner || !command) return undefined;
+
+  return { command, owner, startedAt: `linux:${startedAt}` };
+}
+
 export function parseWindowsProcessSignatureOutput(output: string): ProcessSignature | undefined {
   try {
     const value: unknown = JSON.parse(output);
@@ -132,6 +152,15 @@ export function parseWindowsProcessSignatureOutput(output: string): ProcessSigna
   } catch {
     return undefined;
   }
+}
+
+async function readLinuxProcessSignature(pid: number) {
+  const [statOutput, statusOutput, commandOutput] = await Promise.all([
+    readFile(`/proc/${pid}/stat`, 'utf8'),
+    readFile(`/proc/${pid}/status`, 'utf8'),
+    readFile(`/proc/${pid}/cmdline`, 'utf8'),
+  ]);
+  return parseLinuxProcessSignature(statOutput, statusOutput, commandOutput);
 }
 
 export async function readProcessSignature(
@@ -154,8 +183,17 @@ export async function readProcessSignature(
       return parseWindowsProcessSignatureOutput(stdout);
     }
 
+    if (platform === 'linux') {
+      try {
+        const signature = await readLinuxProcessSignature(pid);
+        if (signature) return signature;
+      } catch {
+        // Fall back to a ps implementation available through PATH.
+      }
+    }
+
     const { stdout } = await execFileAsync(
-      '/bin/ps',
+      'ps',
       ['-ww', '-p', String(pid), '-o', 'uid=', '-o', 'lstart=', '-o', 'command='],
       {
         encoding: 'utf8',
