@@ -1,27 +1,14 @@
-import { createRequire } from 'node:module';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
-import { dirname } from 'node:path';
 
 import { createServer, normalizePath } from 'vite';
-import type { Alias, Plugin } from 'vite';
+import type { Plugin } from 'vite';
 
 import type { SessionRuntimeConfig } from './config.js';
+import { reactAliases, reactRuntimeDirectory } from './react.js';
 
 const virtualEntryId = 'virtual:open-artifacts-session-entry';
 const resolvedVirtualEntryId = `\0${virtualEntryId}`;
-const require = createRequire(import.meta.url);
-
-function reactAliases(): Alias[] {
-  return [
-    { find: 'react/jsx-dev-runtime', replacement: require.resolve('react/jsx-dev-runtime') },
-    { find: 'react/jsx-runtime', replacement: require.resolve('react/jsx-runtime') },
-    { find: 'react-dom/client', replacement: require.resolve('react-dom/client') },
-    { find: 'react-dom', replacement: require.resolve('react-dom') },
-    { find: 'react', replacement: require.resolve('react') },
-  ];
-}
-
 function artifactSessionPlugin(config: SessionRuntimeConfig): Plugin {
   const entryUrl = `/@fs/${normalizePath(config.artifact.entryPath)}`;
 
@@ -113,7 +100,7 @@ async function startRuntime(config: SessionRuntimeConfig) {
     root: config.sessionDirectory,
     server: {
       fs: {
-        allow: [config.artifact.root, config.sessionDirectory, dirname(require.resolve('react'))],
+        allow: [config.artifact.root, config.sessionDirectory, reactRuntimeDirectory()],
       },
       host: '127.0.0.1',
       port: 0,
@@ -132,7 +119,7 @@ async function startRuntime(config: SessionRuntimeConfig) {
 
   await server.listen();
   const address = server.httpServer?.address() as AddressInfo | null;
-  if (!address) throw new Error('Artifact Session Runtime did not bind an HTTP port');
+  if (!address) throw new Error('local runtime did not bind an HTTP port');
 
   await writeFile(
     config.readyFile,
@@ -141,7 +128,7 @@ async function startRuntime(config: SessionRuntimeConfig) {
 }
 
 const configPath = process.argv[2];
-if (!configPath) throw new Error('Artifact Session Runtime requires a config path');
+if (!configPath) throw new Error('local runtime requires a config path');
 
 const config = JSON.parse(await readFile(configPath, 'utf8')) as SessionRuntimeConfig;
 await startRuntime(config);
